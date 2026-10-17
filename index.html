@@ -1,0 +1,1207 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Liquify Pad</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Liquify Pad">
+<meta name="theme-color" content="#1c1d1f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+/* 레이아웃: 상단바 / 왼쪽 도구막대 · 작업 화면 · 오른쪽 옵션 패널. 사진 색 판단을 방해하지 않도록 무채색 회색 UI */
+:root{
+  --bg:#1c1d1f; --surface:#242528; --surface-2:#2d2f33; --line:#3a3c41;
+  --fg:#e8e8ea; --muted:#9b9ea6; --accent:#5aa2ff; --accent-fg:#08111f;
+  --stage:#3a3a3a; --danger:#ff7a7a;
+  --ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 var(--ui);
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none;overflow:hidden}
+button,select,input{font:inherit;color:inherit}
+[hidden]{display:none!important}
+#app{position:fixed;inset:0;display:grid;grid-template-columns:60px 1fr 264px;grid-template-rows:auto 1fr;
+  padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+#app.nopanel{grid-template-columns:60px 1fr 0}
+#app.nopanel #panel{display:none}
+#app.zen{grid-template-columns:0 1fr 0;grid-template-rows:0 1fr}
+#app.zen #top,#app.zen #tools,#app.zen #panel{display:none}
+
+/* 상단바 */
+#top{grid-column:1/-1;display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--surface);border-bottom:1px solid var(--line);min-width:0}
+.brand{font-weight:650;letter-spacing:.02em;margin-right:6px;white-space:nowrap}
+.brand small{color:var(--muted);font-weight:500;margin-left:4px}
+#fileName{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}
+.btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--line);
+  background:var(--surface-2);cursor:pointer;white-space:nowrap;touch-action:manipulation}
+.btn:hover{border-color:#50535a}
+.btn:focus-visible,.tool:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.btn.icon{width:36px;padding:0;justify-content:center}
+.btn.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+.btn:disabled{opacity:.4;cursor:default}
+.btn svg{width:18px;height:18px}
+#zoomPct{font:12px var(--mono);color:var(--muted);min-width:46px;text-align:center;font-variant-numeric:tabular-nums}
+
+/* 도구막대 */
+#tools{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0;overflow-y:auto}
+.tool{position:relative;width:46px;height:46px;border-radius:10px;border:0;background:transparent;display:grid;place-items:center;cursor:pointer;touch-action:manipulation}
+.tool svg{width:22px;height:22px}
+.tool:hover{background:var(--surface-2)}
+.tool.active{background:var(--accent);color:var(--accent-fg)}
+.tool kbd{position:absolute;right:3px;bottom:2px;font:9px var(--mono);opacity:.7}
+.sep{width:30px;height:1px;background:var(--line);margin:4px 0}
+
+/* 작업 화면 */
+#stage{position:relative;overflow:hidden;background:var(--stage);touch-action:none;cursor:none;min-width:0;min-height:0}
+#stage.hand{cursor:grab}
+#stage.zoom{cursor:zoom-in}
+#stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#ov{pointer-events:none}
+#sampleTag{position:absolute;left:12px;bottom:12px;background:rgba(20,21,23,.82);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--muted);pointer-events:auto;max-width:calc(100% - 24px)}
+#sampleTag b{color:var(--fg)}
+#dropHint{position:absolute;inset:12px;border:2px dashed var(--accent);border-radius:14px;display:grid;place-items:center;font-size:18px;background:rgba(90,162,255,.08);pointer-events:none}
+
+/* 옵션 패널 */
+#panel{background:var(--surface);border-left:1px solid var(--line);overflow-y:auto;padding:12px 14px 24px;display:flex;flex-direction:column;gap:18px;min-width:0}
+#panel h3{margin:0 0 8px;font-size:11px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.group{display:flex;flex-direction:column;gap:10px}
+.row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 8px}
+.row label{font-size:13px}
+.row output{font:12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.row input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--accent);height:28px}
+.check{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;min-height:32px}
+.check input{width:20px;height:20px;accent-color:var(--accent)}
+.check select{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;height:30px;padding:0 6px}
+.toolName{font-size:15px;font-weight:600}
+.toolName kbd{font:11px var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 5px;margin-left:6px}
+.hint{font-size:12px;color:var(--muted);line-height:1.5}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+.btnrow .btn{flex:1 1 auto;justify-content:center}
+
+/* 대화상자 */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;z-index:20;padding:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;width:min(560px,100%);max-height:calc(100% - 32px);overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.card h2{margin:0 0 12px;font-size:17px}
+.keys{width:100%;border-collapse:collapse;font-size:13px}
+.keys td{padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top}
+.keys td:first-child{white-space:nowrap;width:40%}
+.keys kbd{font:12px var(--mono);background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:1px 6px}
+.keys tr.h td{color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding-top:14px}
+.progress{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden;margin:12px 0}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#111214;border:1px solid var(--line);
+  padding:10px 16px;border-radius:10px;font-size:13.5px;z-index:30;max-width:calc(100% - 32px);text-align:center}
+#fatal{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;font-size:15px;color:var(--fg)}
+
+@media (max-width:820px){
+  #app{grid-template-columns:56px 1fr 0}
+  #app #panel{position:fixed;right:8px;top:60px;bottom:8px;width:min(280px,calc(100% - 80px));border:1px solid var(--line);border-radius:12px;z-index:10;display:none}
+  #app.panelopen #panel{display:flex}
+  .brand small,#fileName{display:none}
+}
+@media (prefers-reduced-motion:reduce){.progress i{transition:none}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand">Liquify Pad<small>v1</small></div>
+    <button class="btn" id="btnOpen" title="사진 열기 (⌘O)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h6l2 2h10v10H3z"/></svg>열기</button>
+    <span id="fileName"></span>
+    <button class="btn icon" id="btnUndo" title="실행 취소 (⌘Z · 두 손가락 탭)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 7 4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 0 12h-2" transform="translate(0 -6)"/></svg></button>
+    <button class="btn icon" id="btnRedo" title="다시 실행 (⇧⌘Z · 세 손가락 탭)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 7 5 5-5 5"/><path d="M20 12H10a6 6 0 0 0 0 12h2" transform="translate(0 -6)"/></svg></button>
+    <button class="btn" id="btnCompare" title="원본과 비교 (\ 키, 누르고 있으면 원본)">원본</button>
+    <button class="btn icon" id="btnFit" title="화면에 맞춤 (⌘0)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    <span id="zoomPct">100%</span>
+    <button class="btn icon" id="btnPanel" title="옵션 패널 (Tab)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="8" cy="18" r="2" fill="currentColor"/></svg></button>
+    <button class="btn icon" id="btnHelp" title="단축키 (?)">?</button>
+    <button class="btn primary" id="btnExport" title="내보내기 (⌘S)">내보내기</button>
+  </header>
+
+  <nav id="tools" aria-label="도구"></nav>
+
+  <main id="stage">
+    <canvas id="gl"></canvas>
+    <canvas id="ov"></canvas>
+    <div id="sampleTag" hidden><b>샘플 이미지</b>로 바로 써볼 수 있어요. 내 사진은 <b>열기</b>를 누르세요.</div>
+    <div id="dropHint" hidden>여기에 사진을 놓으세요</div>
+  </main>
+
+  <aside id="panel">
+    <div class="group">
+      <div class="toolName" id="toolName">앞으로 밀기<kbd>W</kbd></div>
+      <div class="hint" id="toolHint"></div>
+    </div>
+    <div class="group">
+      <h3>브러시</h3>
+      <div class="row"><label for="sz">크기</label><output id="szv"></output><input type="range" id="sz" min="0" max="1000" step="1"></div>
+      <div class="row"><label for="st">압력(강도)</label><output id="stv"></output><input type="range" id="st" min="1" max="100" step="1"></div>
+      <div class="row"><label for="dn">밀도(가장자리 단단함)</label><output id="dnv"></output><input type="range" id="dn" min="0" max="100" step="1"></div>
+      <div class="row"><label for="rt">속도 (돌리기·오목·볼록·재구성)</label><output id="rtv"></output><input type="range" id="rt" min="1" max="100" step="1"></div>
+    </div>
+    <div class="group">
+      <h3>보기</h3>
+      <label class="check" for="mesh">메시 보기 <span class="hint">M</span><input type="checkbox" id="mesh"></label>
+      <label class="check" for="maskv">고정 마스크 표시 <span class="hint">⇧M</span><input type="checkbox" id="maskv"></label>
+      <label class="check" for="ccol">커서 색
+        <select id="ccol"><option value="auto">흑백 이중선</option><option value="red">빨강</option><option value="cyan">시안</option><option value="yellow">노랑</option><option value="magenta">마젠타</option></select></label>
+      <div class="row"><label for="cw">커서 두께</label><output id="cwv"></output><input type="range" id="cw" min="1" max="4" step="0.5"></div>
+    </div>
+    <div class="group">
+      <h3>입력</h3>
+      <label class="check" for="finger">손가락으로도 칠하기<input type="checkbox" id="finger"></label>
+      <label class="check" for="press">펜슬 필압 사용<input type="checkbox" id="press"></label>
+      <div class="hint">Apple Pencil (USB-C)는 필압이 없어서 꺼두는 게 좋아요. 손가락은 기본적으로 이동·확대에만 써요.</div>
+    </div>
+    <div class="group">
+      <h3>복원</h3>
+      <div class="btnrow">
+        <button class="btn" id="btnRestore">모두 복원</button>
+        <button class="btn" id="btnThaw">마스크 전부 해제</button>
+      </div>
+    </div>
+    <div class="group">
+      <h3>내보내기</h3>
+      <label class="check" for="fmt">형식
+        <select id="fmt"><option value="jpeg">JPEG (품질 95)</option><option value="png">PNG (무손실)</option></select></label>
+      <div class="hint">원본 해상도 그대로 저장해요. 공유 메뉴에서 '이미지 저장'을 고르면 사진 앱에 들어가요.</div>
+    </div>
+  </aside>
+</div>
+
+<input type="file" id="file" accept="image/*" hidden>
+
+<div class="modal" id="helpModal" hidden>
+  <div class="card" role="dialog" aria-labelledby="helpTitle">
+    <h2 id="helpTitle">단축키와 제스처</h2>
+    <table class="keys">
+      <tr class="h"><td colspan="2">도구 (포토샵 픽셀 유동화와 같은 키)</td></tr>
+      <tr><td><kbd>W</kbd></td><td>앞으로 밀기</td></tr>
+      <tr><td><kbd>R</kbd></td><td>재구성 (원래대로 되돌리며 칠하기)</td></tr>
+      <tr><td><kbd>E</kbd></td><td>매끄럽게</td></tr>
+      <tr><td><kbd>C</kbd></td><td>시계 방향 돌리기 · <kbd>⌥</kbd> 누르면 반시계</td></tr>
+      <tr><td><kbd>S</kbd> / <kbd>B</kbd></td><td>오목 / 볼록 · <kbd>⌥</kbd> 누르면 반대로</td></tr>
+      <tr><td><kbd>F</kbd> / <kbd>D</kbd></td><td>마스크 고정 / 마스크 해제</td></tr>
+      <tr><td><kbd>H</kbd> · <kbd>Space</kbd> 누른 채</td><td>손 도구 (화면 이동)</td></tr>
+      <tr><td><kbd>Z</kbd></td><td>돋보기 · <kbd>⌥</kbd> 누르면 축소</td></tr>
+      <tr class="h"><td colspan="2">브러시</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>브러시 크기 줄이기 / 키우기</td></tr>
+      <tr><td><kbd>⇧</kbd> + <kbd>[</kbd> <kbd>]</kbd></td><td>압력(강도) 줄이기 / 키우기</td></tr>
+      <tr class="h"><td colspan="2">편집 · 보기</td></tr>
+      <tr><td><kbd>⌘Z</kbd> · <kbd>⌥⌘Z</kbd></td><td>실행 취소</td></tr>
+      <tr><td><kbd>⇧⌘Z</kbd> · <kbd>⌘Y</kbd></td><td>다시 실행</td></tr>
+      <tr><td><kbd>\</kbd></td><td>원본 보기 켜기/끄기</td></tr>
+      <tr><td><kbd>M</kbd> / <kbd>⇧M</kbd></td><td>메시 보기 / 마스크 표시</td></tr>
+      <tr><td><kbd>⌘0</kbd> · <kbd>⌘1</kbd></td><td>화면 맞춤 · 실제 픽셀(100%)</td></tr>
+      <tr><td><kbd>⌘+</kbd> <kbd>⌘−</kbd></td><td>확대 / 축소</td></tr>
+      <tr><td><kbd>Tab</kbd> · <kbd>⇧Tab</kbd></td><td>옵션 패널 숨기기 · 사진만 크게 보기</td></tr>
+      <tr><td><kbd>⌘O</kbd> · <kbd>⌘S</kbd></td><td>열기 · 내보내기</td></tr>
+      <tr class="h"><td colspan="2">펜슬 · 손가락</td></tr>
+      <tr><td>펜슬</td><td>칠하기. 화면 위에 띄우면(호버) 브러시 원이 보여요</td></tr>
+      <tr><td>한 손가락 끌기</td><td>화면 이동</td></tr>
+      <tr><td>두 손가락 벌리기</td><td>확대 / 축소</td></tr>
+      <tr><td>두 손가락 탭 · 세 손가락 탭</td><td>실행 취소 · 다시 실행</td></tr>
+    </table>
+    <div class="btnrow" style="margin-top:14px"><button class="btn primary" data-close>닫기</button></div>
+  </div>
+</div>
+
+<div class="modal" id="exportModal" hidden>
+  <div class="card" role="dialog" aria-labelledby="exTitle">
+    <h2 id="exTitle">내보내기</h2>
+    <div id="exStatus" class="hint">준비 중…</div>
+    <div class="progress"><i id="exBar"></i></div>
+    <div class="btnrow" id="exActions" hidden>
+      <button class="btn primary" id="btnShare">공유 · 사진에 저장</button>
+      <button class="btn" id="btnDownload">파일로 저장</button>
+    </div>
+    <div class="btnrow" style="margin-top:10px"><button class="btn" data-close>닫기</button></div>
+  </div>
+</div>
+
+<div id="toast" hidden></div>
+
+<script>
+(() => {
+'use strict';
+const $ = (s, r = document) => r.querySelector(s);
+const app = $('#app'), stage = $('#stage'), glc = $('#gl'), ovc = $('#ov'), octx = ovc.getContext('2d');
+
+/* ---------- 설정 ---------- */
+const S = {
+  tool: 'push', diameter: 220, strength: 50, density: 50, rate: 50,
+  showMesh: false, showMask: true, usePressure: false, fingerDraw: false,
+  cursorColor: 'auto', cursorWidth: 2, format: 'jpeg'
+};
+const SKEY = 'liquifypad.settings.v1';
+const SAVED = ['diameter','strength','density','rate','showMesh','showMask','usePressure','fingerDraw','cursorColor','cursorWidth','format','tool'];
+try { const o = JSON.parse(localStorage.getItem(SKEY) || '{}'); for (const k of SAVED) if (k in o) S[k] = o[k]; } catch (e) {}
+let saveTimer = 0;
+function saveSettings() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { try { const o = {}; for (const k of SAVED) o[k] = S[k]; localStorage.setItem(SKEY, JSON.stringify(o)); } catch (e) {} }, 300);
+}
+
+const TOOLS = [
+  { id: 'push', key: 'KeyW', k: 'W', name: '앞으로 밀기', hint: '펜슬로 끄는 방향으로 픽셀을 밀어요. 얼굴 윤곽, 턱선, 허리선 정리에 써요.',
+    icon: '<path d="M4 14c3-1 5-4 9-4h6"/><path d="m16 7 3 3-3 3"/><circle cx="7" cy="14" r="3"/>' },
+  { id: 'reconstruct', key: 'KeyR', k: 'R', name: '재구성', hint: '칠한 곳의 변형을 조금씩 원래대로 되돌려요. 너무 많이 민 부분을 살살 복구할 때 써요.',
+    icon: '<path d="M5 12a7 7 0 1 0 2-5"/><path d="M5 4v4h4"/>' },
+  { id: 'smooth', key: 'KeyE', k: 'E', name: '매끄럽게', hint: '울퉁불퉁해진 변형을 부드럽게 다듬어요.',
+    icon: '<path d="M3 15c3-6 6 0 9-3s6-3 9 0"/><path d="M3 19h18" opacity=".5"/>' },
+  { id: 'twirl', key: 'KeyC', k: 'C', name: '시계 방향 돌리기', hint: '누르고 있는 동안 돌아가요. ⌥를 누르면 반시계 방향이에요.',
+    icon: '<path d="M12 12m-1 0a1 1 0 1 0 2 0a3 3 0 1 0-6 0a5 5 0 1 0 10 0a7 7 0 1 0-14 0"/>' },
+  { id: 'pucker', key: 'KeyS', k: 'S', name: '오목', hint: '누르고 있는 동안 브러시 중심 쪽으로 오므라들어요. 코볼, 얼굴 크기 줄이기에 써요. ⌥는 볼록.',
+    icon: '<circle cx="12" cy="12" r="8" opacity=".45"/><path d="m12 4 0 4m0 8v4M4 12h4m8 0h4"/><path d="m10 6 2 2 2-2M10 18l2-2 2 2M6 10l2 2-2 2M18 10l-2 2 2 2"/>' },
+  { id: 'bloat', key: 'KeyB', k: 'B', name: '볼록', hint: '누르고 있는 동안 브러시 중심에서 바깥으로 부풀어요. 눈 키우기에 써요. ⌥는 오목.',
+    icon: '<circle cx="12" cy="12" r="8" opacity=".45"/><path d="M12 8V3m0 13v5M8 12H3m13 0h5"/><path d="m10 5 2-2 2 2M10 19l2 2 2-2M5 10l-2 2 2 2M19 10l2 2-2 2"/>' },
+  { sep: true },
+  { id: 'freeze', key: 'KeyF', k: 'F', name: '마스크 고정', hint: '칠한 곳은 변형되지 않게 잠가요. 배경의 벽, 문틀 같은 직선을 지킬 때 써요.',
+    icon: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>' },
+  { id: 'thaw', key: 'KeyD', k: 'D', name: '마스크 해제', hint: '고정한 마스크를 지워요.',
+    icon: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>' },
+  { sep: true },
+  { id: 'hand', key: 'KeyH', k: 'H', name: '손 도구', hint: '화면을 끌어서 이동해요. 다른 도구를 쓰는 중에도 Space를 누르고 있으면 손 도구가 돼요.',
+    icon: '<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12m0-7a1.5 1.5 0 0 1 3 0v7m0-6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-2.5-4a1.5 1.5 0 0 1 2.5-1.7L8 15"/>' },
+  { id: 'zoom', key: 'KeyZ', k: 'Z', name: '돋보기', hint: '탭하면 확대, ⌥를 누르고 탭하면 축소해요.',
+    icon: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M8 10.5h5M10.5 8v5"/>' },
+];
+const TOOL_BY_ID = Object.fromEntries(TOOLS.filter(t => !t.sep).map(t => [t.id, t]));
+const PAINT_TOOLS = new Set(['push','reconstruct','smooth','twirl','pucker','bloat','freeze','thaw']);
+const CONTINUOUS = new Set(['reconstruct','smooth','twirl','pucker','bloat']);
+const MODE = { push: 0, twirl: 1, pucker: 2, bloat: 2, reconstruct: 3, smooth: 4 };
+
+/* ---------- 메시지 ---------- */
+let toastTimer = 0;
+function toast(msg, ms = 2200) {
+  const t = $('#toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms);
+}
+function fatal(msg) {
+  const d = document.createElement('div'); d.id = 'fatal'; d.textContent = msg; stage.appendChild(d);
+}
+
+/* ---------- WebGL ---------- */
+const gl = glc.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' });
+if (!gl) { fatal('이 브라우저는 WebGL2를 지원하지 않아요. 최신 iPadOS의 Safari에서 열어 주세요.'); return; }
+let FIELD = null;
+if (gl.getExtension('EXT_color_buffer_float')) FIELD = { internal: gl.RG32F, format: gl.RG, type: gl.FLOAT };
+else if (gl.getExtension('EXT_color_buffer_half_float')) FIELD = { internal: gl.RG16F, format: gl.RG, type: gl.HALF_FLOAT };
+if (!FIELD) { fatal('이 기기의 그래픽 기능으로는 유동화를 계산할 수 없어요.'); return; }
+
+const VS = `#version 300 es
+in vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }`;
+const HEAD = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+`;
+const FIELD_SAMPLE = `
+uniform sampler2D uField; uniform ivec2 uFS; uniform float uS;
+vec2 fd(ivec2 c){ return texelFetch(uField, clamp(c, ivec2(0), uFS - 1), 0).xy; }
+vec2 sd(vec2 f){
+  f -= 0.5; vec2 i = floor(f); vec2 t = f - i; ivec2 c = ivec2(i);
+  return mix(mix(fd(c), fd(c + ivec2(1,0)), t.x), mix(fd(c + ivec2(0,1)), fd(c + ivec2(1,1)), t.x), t.y);
+}
+`;
+// 변위 필드 D: 출력 픽셀 p는 원본의 p + D(p)를 가져온다 (단위: 원본 픽셀)
+const FS_BRUSH = HEAD + FIELD_SAMPLE + `
+uniform sampler2D uMask; uniform int uMode; uniform vec2 uC; uniform float uR; uniform float uStr; uniform float uHard;
+uniform vec2 uDelta; uniform float uAngle; uniform float uK;
+out vec4 o;
+void main(){
+  ivec2 j = ivec2(gl_FragCoord.xy);
+  vec2 p = (vec2(j) + 0.5) * uS;
+  vec2 D = fd(j);
+  float d = length(p - uC) / uR;
+  float w = d >= 1.0 ? 0.0 : 1.0 - smoothstep(uHard, 1.0, d);
+  w *= uStr * (1.0 - texelFetch(uMask, j, 0).r);
+  if (w <= 0.0) { o = vec4(D, 0.0, 1.0); return; }
+  if (uMode < 3) {
+    vec2 q;
+    if (uMode == 0) q = p - w * uDelta;
+    else if (uMode == 1) { float an = -w * uAngle; float cs = cos(an), sn = sin(an); vec2 r = p - uC; q = uC + vec2(cs*r.x - sn*r.y, sn*r.x + cs*r.y); }
+    else q = uC + (p - uC) * (1.0 + w * uK);
+    o = vec4(sd(q / uS) + q - p, 0.0, 1.0);
+  } else if (uMode == 3) {
+    o = vec4(D * (1.0 - min(w, 1.0)), 0.0, 1.0);
+  } else {
+    float st = max(1.0, uR / uS * 0.2);
+    vec2 acc = vec2(0.0);
+    for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) acc += sd(vec2(j) + 0.5 + vec2(float(x), float(y)) * st);
+    o = vec4(mix(D, acc / 25.0, min(w, 1.0)), 0.0, 1.0);
+  }
+}`;
+const FS_COPY = HEAD + `
+uniform sampler2D uSrc; out vec4 o;
+void main(){ o = texelFetch(uSrc, ivec2(gl_FragCoord.xy), 0); }`;
+const FS_MASK = HEAD + `
+uniform float uS; uniform vec2 uC; uniform float uR; uniform float uHard; uniform float uStr; out vec4 o;
+void main(){
+  vec2 p = gl_FragCoord.xy * uS;
+  float d = length(p - uC) / uR;
+  float w = d >= 1.0 ? 0.0 : 1.0 - smoothstep(uHard, 1.0, d);
+  o = vec4(w * uStr);
+}`;
+const FS_RENDER = HEAD + FIELD_SAMPLE + `
+uniform sampler2D uImg; uniform sampler2D uMask; uniform vec2 uImg2; uniform vec2 uOff; uniform float uScale; uniform float uH;
+uniform int uExport; uniform int uOrig; uniform int uMesh; uniform float uGrid; uniform int uShowMask; uniform vec3 uBg;
+out vec4 o;
+void main(){
+  vec2 p = uExport == 1 ? gl_FragCoord.xy : (vec2(gl_FragCoord.x, uH - gl_FragCoord.y) - uOff) / uScale;
+  vec2 src = p + (uOrig == 1 ? vec2(0.0) : sd(p / uS));
+  vec2 uv = src / uImg2;
+  if (uExport == 1) { o = vec4(textureLod(uImg, uv, 0.0).rgb, 1.0); return; }
+  vec3 col = texture(uImg, uv).rgb;
+  vec2 g = src / uGrid; vec2 fw = max(fwidth(g), vec2(1e-4));
+  if (p.x < 0.0 || p.y < 0.0 || p.x > uImg2.x || p.y > uImg2.y) { o = vec4(uBg, 1.0); return; }
+  if (uShowMask == 1) { float m = texture(uMask, p / (vec2(uFS) * uS)).r; col = mix(col, vec3(0.95, 0.22, 0.28), m * 0.45); }
+  if (uMesh == 1) { vec2 l = abs(fract(g - 0.5) - 0.5) / fw; float ln = 1.0 - clamp(min(l.x, l.y), 0.0, 1.0); col = mix(col, vec3(0.8, 0.9, 1.0), ln * 0.7); }
+  o = vec4(col, 1.0);
+}`;
+
+function compile(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const vsObj = compile(gl.VERTEX_SHADER, VS);
+function makeProgram(fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, vsObj); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, 'a'); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+let P;
+try {
+  P = { brush: makeProgram(FS_BRUSH), copy: makeProgram(FS_COPY), mask: makeProgram(FS_MASK), render: makeProgram(FS_RENDER) };
+} catch (err) { fatal('그래픽 초기화에 실패했어요: ' + err.message); return; }
+
+const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+const vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const fbo = gl.createFramebuffer();
+const draw = () => gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+function makeTex(w, h, internal, linear, levels = 1) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texStorage2D(gl.TEXTURE_2D, levels, internal, w, h);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, linear ? (levels > 1 ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR) : gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, linear ? gl.LINEAR : gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function target(tex, w, h) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.viewport(0, 0, w, h);
+}
+function bindTex(unit, tex) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); }
+function unbindAll() { for (let i = 0; i < 3; i++) bindTex(i, null); }
+function clearTex(tex, w, h) { target(tex, w, h); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+function copyTex(src, dst, w, h) {
+  unbindAll(); target(dst, w, h); gl.useProgram(P.copy.p); bindTex(0, src); gl.uniform1i(P.copy.u.uSrc, 0); draw();
+}
+
+/* ---------- 문서 ---------- */
+let doc = null;
+const view = { scale: 1, ox: 0, oy: 0 };
+let DPR = Math.min(window.devicePixelRatio || 1, 2);
+let dirty = true, overlayDirty = true;
+const undoStack = [], redoStack = [];
+const MAX_HIST = 15;
+
+function setupDoc(source, w, h, name, isSample) {
+  if (doc) freeDoc();
+  const maxDim = Math.max(w, h);
+  const s = Math.max(1, maxDim / 2048);
+  const fw = Math.ceil(w / s), fh = Math.ceil(h / s);
+  const levels = Math.floor(Math.log2(maxDim)) + 1;
+  unbindAll();
+  const img = makeTex(w, h, gl.RGBA8, true, levels);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, source);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  const field = makeTex(fw, fh, FIELD.internal, false);
+  const scratch = makeTex(fw, fh, FIELD.internal, false);
+  const mask = makeTex(fw, fh, gl.R8, true);
+  doc = { w, h, s, fw, fh, img, field, scratch, mask, name, isSample, edited: false };
+  target(field, fw, fh);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) { fatal('변위 필드를 만들 수 없어요.'); return; }
+  clearTex(field, fw, fh); clearTex(scratch, fw, fh); clearTex(mask, fw, fh);
+  $('#fileName').textContent = isSample ? '샘플 이미지' : `${name} · ${w}×${h}`;
+  $('#sampleTag').hidden = !isSample;
+  fit(); updateHistoryUI(); dirty = true;
+}
+function freeState(st) { gl.deleteTexture(st.field); gl.deleteTexture(st.mask); }
+function freeDoc() {
+  undoStack.splice(0).forEach(freeState); redoStack.splice(0).forEach(freeState);
+  [doc.img, doc.field, doc.scratch, doc.mask].forEach(t => gl.deleteTexture(t));
+  doc = null;
+}
+function snapshot() {
+  const f = makeTex(doc.fw, doc.fh, FIELD.internal, false);
+  const m = makeTex(doc.fw, doc.fh, gl.R8, true);
+  copyTex(doc.field, f, doc.fw, doc.fh); copyTex(doc.mask, m, doc.fw, doc.fh);
+  return { field: f, mask: m };
+}
+function pushHistory() {
+  undoStack.push(snapshot());
+  while (undoStack.length > MAX_HIST) freeState(undoStack.shift());
+  redoStack.splice(0).forEach(freeState);
+  updateHistoryUI();
+}
+function undo() {
+  if (!doc || stroke || !undoStack.length) return;
+  redoStack.push({ field: doc.field, mask: doc.mask });
+  const st = undoStack.pop(); doc.field = st.field; doc.mask = st.mask;
+  dirty = true; updateHistoryUI();
+}
+function redo() {
+  if (!doc || stroke || !redoStack.length) return;
+  undoStack.push({ field: doc.field, mask: doc.mask });
+  const st = redoStack.pop(); doc.field = st.field; doc.mask = st.mask;
+  dirty = true; updateHistoryUI();
+}
+function dropLastHistory() { // 시작했던 획을 없던 일로
+  const st = undoStack.pop(); if (!st) return;
+  freeState({ field: doc.field, mask: doc.mask }); doc.field = st.field; doc.mask = st.mask;
+  dirty = true; updateHistoryUI();
+}
+function updateHistoryUI() {
+  $('#btnUndo').disabled = !undoStack.length;
+  $('#btnRedo').disabled = !redoStack.length;
+}
+
+/* ---------- 브러시 적용 ---------- */
+const hardness = () => (S.density / 100) * 0.92;
+function scissorFor(cx, cy, r) {
+  const d = doc;
+  const x0 = Math.max(0, Math.floor((cx - r) / d.s) - 2), y0 = Math.max(0, Math.floor((cy - r) / d.s) - 2);
+  const x1 = Math.min(d.fw, Math.ceil((cx + r) / d.s) + 2), y1 = Math.min(d.fh, Math.ceil((cy + r) / d.s) + 2);
+  if (x1 <= x0 || y1 <= y0) return false;
+  gl.enable(gl.SCISSOR_TEST); gl.scissor(x0, y0, x1 - x0, y1 - y0);
+  return true;
+}
+function warpDab(mode, cx, cy, r, str, o) {
+  const d = doc;
+  if (!scissorFor(cx, cy, r)) return;
+  unbindAll();
+  target(d.scratch, d.fw, d.fh);
+  const u = P.brush.u; gl.useProgram(P.brush.p);
+  bindTex(0, d.field); bindTex(1, d.mask);
+  gl.uniform1i(u.uField, 0); gl.uniform1i(u.uMask, 1);
+  gl.uniform2i(u.uFS, d.fw, d.fh); gl.uniform1f(u.uS, d.s);
+  gl.uniform1i(u.uMode, mode); gl.uniform2f(u.uC, cx, cy); gl.uniform1f(u.uR, r);
+  gl.uniform1f(u.uStr, str); gl.uniform1f(u.uHard, hardness());
+  gl.uniform2f(u.uDelta, o.dx || 0, o.dy || 0); gl.uniform1f(u.uAngle, o.angle || 0); gl.uniform1f(u.uK, o.k || 0);
+  draw();
+  copyTex(d.scratch, d.field, d.fw, d.fh);
+  gl.disable(gl.SCISSOR_TEST);
+}
+function maskDab(cx, cy, r, str, freeze) {
+  const d = doc;
+  if (!scissorFor(cx, cy, r)) return;
+  unbindAll(); target(d.mask, d.fw, d.fh);
+  const u = P.mask.u; gl.useProgram(P.mask.p);
+  gl.uniform1f(u.uS, d.s); gl.uniform2f(u.uC, cx, cy); gl.uniform1f(u.uR, r);
+  gl.uniform1f(u.uHard, hardness()); gl.uniform1f(u.uStr, str);
+  gl.enable(gl.BLEND);
+  if (freeze) { gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE, gl.ONE); }
+  else { gl.blendEquation(gl.FUNC_ADD); gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_COLOR); }
+  draw();
+  gl.disable(gl.BLEND); gl.blendEquation(gl.FUNC_ADD);
+  gl.disable(gl.SCISSOR_TEST);
+}
+
+/* ---------- 화면 그리기 ---------- */
+function render() {
+  if (!doc) return;
+  unbindAll();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, glc.width, glc.height);
+  const u = P.render.u; gl.useProgram(P.render.p);
+  bindTex(0, doc.img); bindTex(1, doc.field); bindTex(2, doc.mask);
+  gl.uniform1i(u.uImg, 0); gl.uniform1i(u.uField, 1); gl.uniform1i(u.uMask, 2);
+  gl.uniform2i(u.uFS, doc.fw, doc.fh); gl.uniform1f(u.uS, doc.s);
+  gl.uniform2f(u.uImg2, doc.w, doc.h); gl.uniform2f(u.uOff, view.ox, view.oy);
+  gl.uniform1f(u.uScale, view.scale); gl.uniform1f(u.uH, glc.height);
+  gl.uniform1i(u.uExport, 0); gl.uniform1i(u.uOrig, compare ? 1 : 0);
+  gl.uniform1i(u.uMesh, S.showMesh ? 1 : 0); gl.uniform1f(u.uGrid, Math.max(doc.w, doc.h) / 36);
+  gl.uniform1i(u.uShowMask, S.showMask ? 1 : 0);
+  gl.uniform3f(u.uBg, 0x3a / 255, 0x3a / 255, 0x3a / 255);
+  draw();
+}
+
+/* ---------- 커서 ---------- */
+const cur = { x: 0, y: 0, has: false, hover: false, t: 0, hudUntil: 0, hud: '' };
+const CURSOR_COLORS = { auto: '#ffffff', red: '#ff3b3b', cyan: '#2ee6ff', yellow: '#ffe22e', magenta: '#ff3bd8' };
+function drawOverlay() {
+  octx.clearRect(0, 0, ovc.width, ovc.height);
+  if (!doc || !cur.has) return;
+  const now = performance.now();
+  const live = cur.hover || stroke || now - cur.t < 1500;
+  const alpha = live ? 1 : 0.5;
+  const tool = activeTool();
+  const k = DPR, lw = S.cursorWidth * k;
+  octx.save(); octx.globalAlpha = alpha; octx.translate(cur.x, cur.y);
+  const ring = (rad, dash) => {
+    octx.setLineDash(dash ? [6 * k, 5 * k] : []);
+    octx.beginPath(); octx.arc(0, 0, rad, 0, Math.PI * 2);
+    octx.strokeStyle = 'rgba(0,0,0,0.8)'; octx.lineWidth = lw + 2 * k; octx.stroke();
+    octx.strokeStyle = CURSOR_COLORS[S.cursorColor] || '#fff'; octx.lineWidth = lw; octx.stroke();
+  };
+  if (PAINT_TOOLS.has(tool)) {
+    const r = Math.max(2 * k, (S.diameter / 2) * view.scale);
+    ring(r, false);
+    const h = hardness();
+    if (h > 0.05 && r * h > 6 * k) ring(r * h, true);
+  }
+  // 가운데 십자선: 브러시가 아무리 작거나 커도 정확한 위치를 보여줌
+  octx.setLineDash([]);
+  const c = 6 * k;
+  octx.beginPath(); octx.moveTo(-c, 0); octx.lineTo(c, 0); octx.moveTo(0, -c); octx.lineTo(0, c);
+  octx.strokeStyle = 'rgba(0,0,0,0.8)'; octx.lineWidth = lw + 2 * k; octx.stroke();
+  octx.strokeStyle = CURSOR_COLORS[S.cursorColor] || '#fff'; octx.lineWidth = lw; octx.stroke();
+  octx.restore();
+  if (now < cur.hudUntil) {
+    octx.font = `${13 * k}px -apple-system, sans-serif`;
+    const tw = octx.measureText(cur.hud).width;
+    const r = PAINT_TOOLS.has(tool) ? (S.diameter / 2) * view.scale : 0;
+    let x = cur.x + r + 10 * k, y = cur.y - 12 * k;
+    if (x + tw + 16 * k > ovc.width) x = cur.x - r - tw - 26 * k;
+    octx.fillStyle = 'rgba(17,18,20,0.88)'; octx.fillRect(x, y, tw + 16 * k, 24 * k);
+    octx.fillStyle = '#e8e8ea'; octx.fillText(cur.hud, x + 8 * k, y + 16.5 * k);
+  }
+}
+function showHud(text) { cur.hud = text; cur.hudUntil = performance.now() + 1100; overlayDirty = true; setTimeout(() => overlayDirty = true, 1150); }
+let fadeTimer = 0;
+function moveCursor(sp, hover) {
+  cur.x = sp.x; cur.y = sp.y; cur.has = true; cur.hover = hover; cur.t = performance.now(); overlayDirty = true;
+  clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { overlayDirty = true; }, 1550);
+}
+
+/* ---------- 보기 ---------- */
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const r = stage.getBoundingClientRect();
+  const w = Math.max(1, Math.round(r.width * DPR)), h = Math.max(1, Math.round(r.height * DPR));
+  if (glc.width !== w || glc.height !== h) {
+    const ow = glc.width, oh = glc.height;
+    glc.width = ovc.width = w; glc.height = ovc.height = h;
+    if (doc && !view.touched) fit();
+    else if (doc) { view.ox += (w - ow) / 2; view.oy += (h - oh) / 2; }
+  }
+  dirty = overlayDirty = true;
+}
+function fit() {
+  if (!doc) return;
+  const pad = 24 * DPR;
+  view.scale = Math.min((glc.width - pad * 2) / doc.w, (glc.height - pad * 2) / doc.h);
+  view.ox = (glc.width - doc.w * view.scale) / 2; view.oy = (glc.height - doc.h * view.scale) / 2;
+  zoomChanged(); view.touched = false;
+}
+function zoomAt(sx, sy, newScale) {
+  newScale = Math.min(32, Math.max(0.01, newScale));
+  view.ox = sx - (sx - view.ox) * newScale / view.scale;
+  view.oy = sy - (sy - view.oy) * newScale / view.scale;
+  view.scale = newScale; zoomChanged();
+}
+function zoomChanged() { view.touched = true; $('#zoomPct').textContent = Math.round(view.scale * 100) + '%'; dirty = overlayDirty = true; }
+const center = () => ({ x: glc.width / 2, y: glc.height / 2 });
+const stagePt = e => { const r = stage.getBoundingClientRect(); return { x: (e.clientX - r.left) * DPR, y: (e.clientY - r.top) * DPR }; };
+const toImg = sp => ({ x: (sp.x - view.ox) / view.scale, y: (sp.y - view.oy) / view.scale });
+
+/* ---------- 획 (stroke) ---------- */
+let stroke = null, compare = false, spaceHeld = false, pan = null;
+const activeTool = () => (spaceHeld ? 'hand' : S.tool);
+function pressureOf(e) { return (S.usePressure && e.pointerType === 'pen' && e.pressure > 0) ? Math.min(1, Math.max(0.05, e.pressure)) : 1; }
+function beginStroke(sp, e) {
+  const tool = activeTool();
+  pushHistory();
+  const ip = toImg(sp);
+  stroke = { id: e.pointerId, tool, last: ip, cur: ip, applied: ip, alt: e.altKey, pf: pressureOf(e), t: performance.now() };
+  if (tool === 'freeze' || tool === 'thaw') maskDab(ip.x, ip.y, S.diameter / 2, stroke.pf, tool === 'freeze');
+  doc.edited = true; dirty = true;
+}
+function moveStroke(sp, e) {
+  const st = stroke; const ip = toImg(sp);
+  st.alt = e.altKey; st.pf = pressureOf(e);
+  const r = S.diameter / 2;
+  if (st.tool === 'push') {
+    const dx = ip.x - st.last.x, dy = ip.y - st.last.y, dist = Math.hypot(dx, dy);
+    if (dist < 0.05) return;
+    const step = Math.max(0.5, r * 0.1), n = Math.ceil(dist / step), sx = dx / n, sy = dy / n;
+    const str = S.strength / 100 * st.pf;
+    for (let i = 0; i < n; i++) warpDab(0, st.last.x + sx * (i + 0.5), st.last.y + sy * (i + 0.5), r, str, { dx: sx, dy: sy });
+    st.last = ip;
+  } else if (st.tool === 'freeze' || st.tool === 'thaw') {
+    const dx = ip.x - st.last.x, dy = ip.y - st.last.y, dist = Math.hypot(dx, dy), step = Math.max(0.5, r * 0.2);
+    if (dist < step) return;
+    const n = Math.floor(dist / step);
+    for (let i = 1; i <= n; i++) maskDab(st.last.x + dx * i / n, st.last.y + dy * i / n, r, st.pf, st.tool === 'freeze');
+    st.last = ip;
+  } else st.cur = ip;
+  dirty = true;
+}
+function continuousStep(dt) {
+  const st = stroke, r = S.diameter / 2, rate = S.rate / 100;
+  const a = st.applied, b = st.cur;
+  const dist = Math.hypot(b.x - a.x, b.y - a.y), step = Math.max(0.5, r * 0.25);
+  const n = Math.max(1, Math.ceil(dist / step));
+  const amt = dt / n, str = S.strength / 100 * st.pf;
+  for (let i = 1; i <= n; i++) {
+    const x = a.x + (b.x - a.x) * i / n, y = a.y + (b.y - a.y) * i / n;
+    switch (st.tool) {
+      case 'twirl': warpDab(1, x, y, r, str, { angle: rate * 3.2 * amt * (st.alt ? -1 : 1) }); break;
+      case 'pucker': warpDab(2, x, y, r, str, { k: rate * 1.1 * amt * (st.alt ? -1 : 1) }); break;
+      case 'bloat': warpDab(2, x, y, r, str, { k: -rate * 1.1 * amt * (st.alt ? -1 : 1) }); break;
+      case 'reconstruct': warpDab(3, x, y, r, str * Math.min(1, rate * 4 * amt), {}); break;
+      case 'smooth': warpDab(4, x, y, r, str * Math.min(1, rate * 5 * amt), {}); break;
+    }
+  }
+  st.applied = b;
+}
+function endStroke() { stroke = null; dirty = overlayDirty = true; }
+
+/* ---------- 포인터 · 제스처 ---------- */
+const touches = new Map();
+let gesture = null, tapInfo = null;
+function touchCentroid() {
+  let x = 0, y = 0; for (const t of touches.values()) { x += t.x; y += t.y; }
+  return { x: x / touches.size, y: y / touches.size };
+}
+function touchDist() { const a = [...touches.values()]; return Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y); }
+function capture(e) { try { stage.setPointerCapture(e.pointerId); } catch (err) {} }
+function startGesture() {
+  if (touches.size >= 2) gesture = { type: 'pinch', c0: touchCentroid(), d0: Math.max(1, touchDist()), s0: view.scale, ox: view.ox, oy: view.oy };
+  else if (touches.size === 1) { const c = touchCentroid(); gesture = { type: 'pan', c0: c, ox: view.ox, oy: view.oy }; }
+  else gesture = null;
+}
+stage.addEventListener('pointerdown', e => {
+  if (!doc) return;
+  const sp = stagePt(e);
+  if (e.pointerType === 'touch') {
+    if (stroke && stroke.id !== e.pointerId && !stroke.finger) return; // 펜슬로 칠하는 중엔 손바닥 무시
+    capture(e);
+    touches.set(e.pointerId, { x: sp.x, y: sp.y, x0: sp.x, y0: sp.y });
+    if (touches.size === 1) tapInfo = { t: performance.now(), max: 1, moved: false };
+    else if (tapInfo) tapInfo.max = Math.max(tapInfo.max, touches.size);
+    if (stroke && stroke.finger && touches.size > 1) { dropLastHistory(); stroke = null; }
+    const tool = activeTool();
+    if (touches.size === 1 && S.fingerDraw && PAINT_TOOLS.has(tool)) {
+      beginStroke(sp, e); stroke.finger = true; moveCursor(sp, false); gesture = null;
+    } else startGesture();
+    return;
+  }
+  if (e.button !== 0) return;
+  capture(e);
+  if (gesture) { touches.clear(); gesture = null; }
+  moveCursor(sp, false);
+  const tool = activeTool();
+  if (tool === 'hand') { pan = { id: e.pointerId, x0: sp.x, y0: sp.y, ox: view.ox, oy: view.oy }; stage.style.cursor = 'grabbing'; }
+  else if (tool === 'zoom') zoomAt(sp.x, sp.y, view.scale * (e.altKey ? 1 / 1.6 : 1.6));
+  else beginStroke(sp, e);
+});
+stage.addEventListener('pointermove', e => {
+  if (!doc) return;
+  const sp = stagePt(e);
+  if (e.pointerType === 'touch') {
+    const t = touches.get(e.pointerId);
+    if (!t) return;
+    t.x = sp.x; t.y = sp.y;
+    if (tapInfo && Math.hypot(t.x - t.x0, t.y - t.y0) > 12 * DPR) tapInfo.moved = true;
+    if (stroke && stroke.finger && stroke.id === e.pointerId) { moveStroke(sp, e); moveCursor(sp, false); return; }
+    if (!gesture) return;
+    if (gesture.type === 'pinch' && touches.size >= 2) {
+      const c = touchCentroid(), d = touchDist();
+      const ns = Math.min(32, Math.max(0.01, gesture.s0 * d / gesture.d0));
+      const ix = (gesture.c0.x - gesture.ox) / gesture.s0, iy = (gesture.c0.y - gesture.oy) / gesture.s0;
+      view.scale = ns; view.ox = c.x - ix * ns; view.oy = c.y - iy * ns; zoomChanged();
+    } else if (gesture.type === 'pan') {
+      const c = touchCentroid(); view.ox = gesture.ox + c.x - gesture.c0.x; view.oy = gesture.oy + c.y - gesture.c0.y; view.touched = true; dirty = true;
+    }
+    return;
+  }
+  const hover = e.buttons === 0;
+  moveCursor(sp, hover);
+  if (pan && pan.id === e.pointerId) { view.ox = pan.ox + sp.x - pan.x0; view.oy = pan.oy + sp.y - pan.y0; view.touched = true; dirty = true; return; }
+  if (stroke && stroke.id === e.pointerId) {
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+    if (evs && evs.length > 1) for (const ce of evs) moveStroke(stagePt(ce), ce); else moveStroke(sp, e);
+  }
+});
+function pointerEnd(e) {
+  if (e.pointerType === 'touch') {
+    if (!touches.has(e.pointerId)) return;
+    touches.delete(e.pointerId);
+    if (stroke && stroke.finger && stroke.id === e.pointerId) endStroke();
+    if (touches.size === 0) {
+      if (tapInfo && !tapInfo.moved && performance.now() - tapInfo.t < 320 && e.type === 'pointerup') {
+        if (tapInfo.max === 2) { undo(); toast('실행 취소', 900); }
+        else if (tapInfo.max === 3) { redo(); toast('다시 실행', 900); }
+      }
+      tapInfo = null; gesture = null;
+    } else startGesture();
+    return;
+  }
+  if (pan && pan.id === e.pointerId) { pan = null; stage.style.cursor = ''; }
+  if (stroke && stroke.id === e.pointerId) endStroke();
+  cur.hover = false; overlayDirty = true;
+}
+stage.addEventListener('pointerup', pointerEnd);
+stage.addEventListener('pointercancel', pointerEnd);
+stage.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch') { cur.hover = false; overlayDirty = true; } });
+stage.addEventListener('wheel', e => {
+  if (!doc) return; e.preventDefault();
+  const sp = stagePt(e);
+  if (e.ctrlKey || e.metaKey) zoomAt(sp.x, sp.y, view.scale * Math.exp(-e.deltaY * 0.01));
+  else { view.ox -= e.deltaX * DPR; view.oy -= e.deltaY * DPR; view.touched = true; dirty = overlayDirty = true; }
+}, { passive: false });
+// iPad 트랙패드 핀치 (Safari 전용 제스처 이벤트)
+let gs0 = 1;
+stage.addEventListener('gesturestart', e => { e.preventDefault(); gs0 = view.scale; });
+stage.addEventListener('gesturechange', e => {
+  e.preventDefault(); if (!doc || touches.size) return;
+  const sp = stagePt(e); zoomAt(sp.x, sp.y, gs0 * e.scale);
+});
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+
+/* ---------- 루프 ---------- */
+let lastT = performance.now();
+function frame(t) {
+  const dt = Math.min(0.05, Math.max(0, (t - lastT) / 1000)); lastT = t;
+  if (stroke && CONTINUOUS.has(stroke.tool)) { continuousStep(dt); dirty = true; }
+  if (dirty) { render(); dirty = false; }
+  if (overlayDirty || stroke) { drawOverlay(); overlayDirty = false; }
+  requestAnimationFrame(frame);
+}
+
+/* ---------- UI ---------- */
+const toolsEl = $('#tools');
+for (const t of TOOLS) {
+  if (t.sep) { const s = document.createElement('div'); s.className = 'sep'; toolsEl.appendChild(s); continue; }
+  const b = document.createElement('button');
+  b.className = 'tool'; b.dataset.tool = t.id; b.title = `${t.name} (${t.k})`; b.setAttribute('aria-label', t.name);
+  b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${t.icon}</svg><kbd>${t.k}</kbd>`;
+  b.addEventListener('click', () => setTool(t.id));
+  toolsEl.appendChild(b);
+}
+function setTool(id) {
+  if (!TOOL_BY_ID[id]) return;
+  S.tool = id; saveSettings();
+  for (const b of toolsEl.querySelectorAll('.tool')) b.classList.toggle('active', b.dataset.tool === id);
+  const t = TOOL_BY_ID[id];
+  $('#toolName').innerHTML = `${t.name}<kbd>${t.k}</kbd>`;
+  $('#toolHint').textContent = t.hint;
+  updateStageCursor(); overlayDirty = true;
+}
+function updateStageCursor() {
+  const t = activeTool();
+  stage.classList.toggle('hand', t === 'hand'); stage.classList.toggle('zoom', t === 'zoom');
+}
+const sizeFromSlider = v => Math.round(2 * Math.pow(1500, v / 1000));
+const sliderFromSize = d => Math.round(1000 * Math.log(Math.max(2, d) / 2) / Math.log(1500));
+function syncControls() {
+  $('#sz').value = sliderFromSize(S.diameter); $('#szv').textContent = S.diameter + ' px';
+  $('#st').value = S.strength; $('#stv').textContent = S.strength;
+  $('#dn').value = S.density; $('#dnv').textContent = S.density;
+  $('#rt').value = S.rate; $('#rtv').textContent = S.rate;
+  $('#cw').value = S.cursorWidth; $('#cwv').textContent = S.cursorWidth + ' pt';
+  $('#mesh').checked = S.showMesh; $('#maskv').checked = S.showMask;
+  $('#press').checked = S.usePressure; $('#finger').checked = S.fingerDraw;
+  $('#ccol').value = S.cursorColor; $('#fmt').value = S.format;
+}
+function bindRange(id, fn) {
+  const el = $('#' + id);
+  el.addEventListener('input', () => { fn(+el.value); syncControls(); saveSettings(); overlayDirty = dirty = true; });
+  el.addEventListener('change', () => el.blur());
+}
+bindRange('sz', v => S.diameter = sizeFromSlider(v));
+bindRange('st', v => S.strength = v);
+bindRange('dn', v => S.density = v);
+bindRange('rt', v => S.rate = v);
+bindRange('cw', v => S.cursorWidth = v);
+function bindCheck(id, key) { const el = $('#' + id); el.addEventListener('change', () => { S[key] = el.checked; saveSettings(); dirty = overlayDirty = true; el.blur(); }); }
+bindCheck('mesh', 'showMesh'); bindCheck('maskv', 'showMask'); bindCheck('press', 'usePressure'); bindCheck('finger', 'fingerDraw');
+$('#ccol').addEventListener('change', e => { S.cursorColor = e.target.value; saveSettings(); overlayDirty = true; e.target.blur(); });
+$('#fmt').addEventListener('change', e => { S.format = e.target.value; saveSettings(); e.target.blur(); });
+document.addEventListener('click', e => { const b = e.target.closest('button'); if (b) b.blur(); });
+
+function setSize(d) { S.diameter = Math.min(3000, Math.max(2, Math.round(d))); syncControls(); saveSettings(); showHud(`크기 ${S.diameter}px`); }
+function setStrength(v) { S.strength = Math.min(100, Math.max(1, Math.round(v))); syncControls(); saveSettings(); showHud(`압력 ${S.strength}`); }
+function setCompare(on) { compare = on; $('#btnCompare').classList.toggle('on', on); dirty = true; }
+function toggleMesh() { S.showMesh = !S.showMesh; syncControls(); saveSettings(); dirty = true; toast(S.showMesh ? '메시 보기 켬' : '메시 보기 끔', 900); }
+function toggleMask() { S.showMask = !S.showMask; syncControls(); saveSettings(); dirty = true; toast(S.showMask ? '마스크 표시 켬' : '마스크 표시 끔', 900); }
+function togglePanel() {
+  if (window.matchMedia('(max-width:820px)').matches) app.classList.toggle('panelopen');
+  else app.classList.toggle('nopanel');
+  requestAnimationFrame(resize);
+}
+function toggleZen() { app.classList.toggle('zen'); requestAnimationFrame(resize); }
+
+$('#btnOpen').addEventListener('click', () => $('#file').click());
+$('#btnUndo').addEventListener('click', undo);
+$('#btnRedo').addEventListener('click', redo);
+$('#btnFit').addEventListener('click', fit);
+$('#btnPanel').addEventListener('click', togglePanel);
+$('#btnHelp').addEventListener('click', () => openModal('helpModal'));
+$('#btnExport').addEventListener('click', exportImage);
+$('#btnCompare').addEventListener('click', () => setCompare(!compare));
+$('#btnRestore').addEventListener('click', () => { if (!doc) return; pushHistory(); clearTex(doc.field, doc.fw, doc.fh); dirty = true; toast('모든 변형을 원래대로 돌렸어요. ⌘Z로 되살릴 수 있어요.'); });
+$('#btnThaw').addEventListener('click', () => { if (!doc) return; pushHistory(); clearTex(doc.mask, doc.fw, doc.fh); dirty = true; toast('고정 마스크를 모두 지웠어요.'); });
+function openModal(id) { $('#' + id).hidden = false; }
+function closeModals() { for (const m of document.querySelectorAll('.modal')) m.hidden = true; }
+for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', closeModals);
+for (const m of document.querySelectorAll('.modal')) m.addEventListener('pointerdown', e => { if (e.target === m) closeModals(); });
+const modalOpen = () => [...document.querySelectorAll('.modal')].some(m => !m.hidden);
+
+/* ---------- 키보드 (e.code 사용: 한글 입력 상태에서도 동작) ---------- */
+window.addEventListener('keydown', e => {
+  if (e.target.matches && e.target.matches('input[type=text], textarea')) return;
+  const c = e.code, meta = e.metaKey || e.ctrlKey;
+  if (c === 'Escape') { closeModals(); return; }
+  if (modalOpen()) return;
+  if (meta) {
+    let handled = true;
+    if (c === 'KeyZ') { if (e.shiftKey) redo(); else undo(); }
+    else if (c === 'KeyY') redo();
+    else if (c === 'KeyO') $('#file').click();
+    else if (c === 'KeyS') exportImage();
+    else if (c === 'Digit0' || c === 'Numpad0') fit();
+    else if (c === 'Digit1' || c === 'Numpad1') { const p = center(); zoomAt(p.x, p.y, 1); }
+    else if (c === 'Equal' || c === 'NumpadAdd') { const p = center(); zoomAt(p.x, p.y, view.scale * 1.25); }
+    else if (c === 'Minus' || c === 'NumpadSubtract') { const p = center(); zoomAt(p.x, p.y, view.scale / 1.25); }
+    else handled = false;
+    if (handled) e.preventDefault();
+    return;
+  }
+  if (c === 'Space') { e.preventDefault(); if (!spaceHeld) { spaceHeld = true; updateStageCursor(); overlayDirty = true; } return; }
+  if (e.repeat && !(c === 'BracketLeft' || c === 'BracketRight')) return;
+  const t = TOOLS.find(x => x.key === c);
+  if (t && !e.altKey) { e.preventDefault(); setTool(t.id); return; }
+  switch (c) {
+    case 'BracketLeft': e.preventDefault(); e.shiftKey ? setStrength(S.strength - 5) : setSize(Math.min(S.diameter - 1, S.diameter / 1.12)); break;
+    case 'BracketRight': e.preventDefault(); e.shiftKey ? setStrength(S.strength + 5) : setSize(Math.max(S.diameter + 1, S.diameter * 1.12)); break;
+    case 'Backslash': e.preventDefault(); setCompare(!compare); break;
+    case 'KeyM': e.preventDefault(); e.shiftKey ? toggleMask() : toggleMesh(); break;
+    case 'Tab': e.preventDefault(); e.shiftKey ? toggleZen() : togglePanel(); break;
+    case 'Slash': if (e.shiftKey) { e.preventDefault(); openModal('helpModal'); } break;
+  }
+});
+window.addEventListener('keyup', e => {
+  if (e.code === 'Space') { e.preventDefault(); spaceHeld = false; updateStageCursor(); overlayDirty = true; }
+});
+window.addEventListener('blur', () => { spaceHeld = false; updateStageCursor(); });
+
+/* ---------- 열기 ---------- */
+$('#file').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFile(f); });
+stage.addEventListener('dragover', e => { e.preventDefault(); $('#dropHint').hidden = false; });
+stage.addEventListener('dragleave', () => { $('#dropHint').hidden = true; });
+stage.addEventListener('drop', e => { e.preventDefault(); $('#dropHint').hidden = true; const f = e.dataTransfer.files[0]; if (f) openFile(f); });
+
+async function decodeFile(file) {
+  try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) {}
+  const url = URL.createObjectURL(file);
+  try { const img = new Image(); img.src = url; await img.decode(); return img; }
+  finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+}
+async function openFile(file) {
+  if (doc && doc.edited && !confirm('지금 작업한 내용을 버리고 새 사진을 열까요?')) return;
+  if (/\.(cr2|cr3|nef|arw|raf|dng|orf|rw2)$/i.test(file.name)) { toast('RAW 파일은 직접 열 수 없어요. 라이트룸이나 캡쳐원에서 JPEG/TIFF로 내보낸 뒤 열어 주세요.', 4500); return; }
+  toast('사진을 여는 중…', 8000);
+  let src;
+  try { src = await decodeFile(file); } catch (err) { toast('이 파일은 열 수 없어요. JPEG, PNG, HEIC, TIFF를 써 주세요.', 4000); return; }
+  let w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
+  const max = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 16384);
+  let note = '';
+  if (w > max || h > max) {
+    const k = max / Math.max(w, h);
+    const nw = Math.floor(w * k), nh = Math.floor(h * k);
+    src = await createImageBitmap(src, { resizeWidth: nw, resizeHeight: nh, resizeQuality: 'high' });
+    note = ` (기기 한계로 ${nw}×${nh}로 줄였어요)`; w = nw; h = nh;
+  }
+  setupDoc(src, w, h, file.name.replace(/\.[^.]+$/, ''), false);
+  if (src.close) src.close();
+  toast(`열었어요 · ${w}×${h}${note}`, note ? 4500 : 1800);
+}
+window.addEventListener('beforeunload', e => { if (doc && doc.edited && !doc.isSample) { e.preventDefault(); e.returnValue = ''; } });
+
+/* ---------- 샘플 이미지 ---------- */
+function makeSample() {
+  const w = 2400, h = 1600, c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#9fb7c9'); g.addColorStop(1, '#e8d9c6'); x.fillStyle = g; x.fillRect(0, 0, w, h);
+  x.strokeStyle = 'rgba(40,50,60,.35)'; x.lineWidth = 3;
+  for (let i = 0; i <= w; i += 100) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, h); x.stroke(); }
+  for (let i = 0; i <= h; i += 100) { x.beginPath(); x.moveTo(0, i); x.lineTo(w, i); x.stroke(); }
+  // 얼굴 모양 연습용 도형
+  x.fillStyle = '#e9b99a'; x.beginPath(); x.ellipse(1200, 820, 330, 430, 0, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#3b2a22'; x.beginPath(); x.ellipse(1200, 520, 360, 200, 0, Math.PI, Math.PI * 2); x.fill();
+  x.fillStyle = '#fff'; for (const ex of [1070, 1330]) { x.beginPath(); x.ellipse(ex, 780, 62, 34, 0, 0, Math.PI * 2); x.fill(); }
+  x.fillStyle = '#2b3a4a'; for (const ex of [1070, 1330]) { x.beginPath(); x.arc(ex, 780, 26, 0, Math.PI * 2); x.fill(); }
+  x.strokeStyle = '#b07a62'; x.lineWidth = 10; x.beginPath(); x.moveTo(1200, 820); x.lineTo(1170, 960); x.lineTo(1215, 970); x.stroke();
+  x.strokeStyle = '#a4484a'; x.lineWidth = 14; x.beginPath(); x.arc(1200, 1000, 110, 0.2 * Math.PI, 0.8 * Math.PI); x.stroke();
+  x.fillStyle = 'rgba(30,35,40,.75)'; x.font = '600 64px -apple-system, sans-serif'; x.fillText('Liquify Pad · 연습용 샘플', 80, 140);
+  x.font = '36px -apple-system, sans-serif'; x.fillText('W로 턱선을 밀고, B로 눈을 키우고, \\ 키로 원본과 비교해 보세요', 80, 200);
+  setupDoc(c, w, h, 'sample', true);
+}
+
+/* ---------- 내보내기 ---------- */
+let exported = null;
+function nextFrame() { return new Promise(r => requestAnimationFrame(() => setTimeout(r, 0))); }
+function setExport(msg, p) { $('#exStatus').textContent = msg; $('#exBar').style.width = Math.round(p * 100) + '%'; }
+async function exportImage() {
+  if (!doc || stroke) return;
+  exported = null; $('#exActions').hidden = true; openModal('exportModal');
+  setExport('원본 해상도로 렌더링 중…', 0.05); await nextFrame();
+  const { w, h } = doc;
+  let px;
+  try {
+    unbindAll();
+    const out = makeTex(w, h, gl.RGBA8, false);
+    target(out, w, h);
+    const u = P.render.u; gl.useProgram(P.render.p);
+    bindTex(0, doc.img); bindTex(1, doc.field); bindTex(2, doc.mask);
+    gl.uniform1i(u.uImg, 0); gl.uniform1i(u.uField, 1); gl.uniform1i(u.uMask, 2);
+    gl.uniform2i(u.uFS, doc.fw, doc.fh); gl.uniform1f(u.uS, doc.s); gl.uniform2f(u.uImg2, w, h);
+    gl.uniform1i(u.uExport, 1); gl.uniform1i(u.uOrig, 0);
+    draw();
+    px = new Uint8ClampedArray(w * h * 4);
+    const strip = 256;
+    for (let y = 0; y < h; y += strip) {
+      const hh = Math.min(strip, h - y);
+      gl.readPixels(0, y, w, hh, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(px.buffer, y * w * 4, hh * w * 4));
+    }
+    unbindAll(); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteTexture(out);
+    dirty = true;
+  } catch (err) { setExport('렌더링에 실패했어요: ' + err.message, 0); return; }
+  setExport('파일로 만드는 중…', 0.3); await nextFrame();
+  const type = S.format === 'png' ? 'image/png' : 'image/jpeg';
+  let blob = null;
+  if (w * h <= 16000000) {
+    try {
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').putImageData(new ImageData(px, w, h), 0, 0);
+      blob = await new Promise(r => c.toBlob(r, type, 0.95));
+      c.width = c.height = 1;
+    } catch (e) { blob = null; }
+  }
+  try {
+    if (!blob) blob = type === 'image/png' ? await encodePNG(px, w, h) : await encodeJPEGInWorker(px, w, h, 95);
+  } catch (err) { setExport('파일을 만들지 못했어요: ' + err.message, 0); return; }
+  const ext = type === 'image/png' ? 'png' : 'jpg';
+  const name = (doc.isSample ? 'liquify-sample' : doc.name + '_liquify') + '.' + ext;
+  exported = new File([blob], name, { type });
+  setExport(`${name} · ${w}×${h} · ${(blob.size / 1048576).toFixed(1)}MB 준비됐어요.`, 1);
+  const canShare = navigator.canShare && navigator.canShare({ files: [exported] });
+  $('#btnShare').hidden = !canShare;
+  $('#exActions').hidden = false;
+}
+$('#btnShare').addEventListener('click', async () => {
+  if (!exported) return;
+  try { await navigator.share({ files: [exported] }); } catch (e) { if (e.name !== 'AbortError') toast('공유하지 못했어요. 파일로 저장을 눌러 주세요.'); }
+});
+$('#btnDownload').addEventListener('click', () => {
+  if (!exported) return;
+  const a = document.createElement('a'); a.href = URL.createObjectURL(exported); a.download = exported.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+});
+
+// iOS 캔버스 크기 한계(약 1,670만 화소)를 넘는 사진은 직접 인코딩
+async function encodePNG(px, w, h) {
+  const rowLen = w * 3 + 1, raw = new Uint8Array(rowLen * h);
+  for (let y = 0; y < h; y++) {
+    let o = y * rowLen + 1, i = y * w * 4;
+    for (let x = 0; x < w; x++, i += 4) { raw[o++] = px[i]; raw[o++] = px[i + 1]; raw[o++] = px[i + 2]; }
+  }
+  const z = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+  const crcT = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; crcT[n] = c >>> 0; }
+  const chunk = (type, data) => {
+    const b = new Uint8Array(12 + data.length), dv = new DataView(b.buffer);
+    dv.setUint32(0, data.length); for (let i = 0; i < 4; i++) b[4 + i] = type.charCodeAt(i);
+    b.set(data, 8);
+    let c = 0xFFFFFFFF; for (let i = 4; i < 8 + data.length; i++) c = crcT[(c ^ b[i]) & 255] ^ (c >>> 8);
+    dv.setUint32(8 + data.length, (c ^ 0xFFFFFFFF) >>> 0);
+    return b;
+  };
+  const ihdr = new Uint8Array(13), dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, w); dv.setUint32(4, h); ihdr[8] = 8; ihdr[9] = 2;
+  return new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', z), chunk('IEND', new Uint8Array(0))], { type: 'image/png' });
+}
+function encodeJPEGInWorker(px, w, h, q) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob(['(' + jpegWorker.toString() + ')()'], { type: 'text/javascript' }));
+    const wk = new Worker(url);
+    wk.onmessage = ev => {
+      const m = ev.data;
+      if (m.progress != null) { setExport(`JPEG로 압축 중… ${Math.round(m.progress * 100)}%`, 0.3 + m.progress * 0.7); return; }
+      wk.terminate(); URL.revokeObjectURL(url);
+      m.ok ? resolve(new Blob([m.buf], { type: 'image/jpeg' })) : reject(new Error(m.error));
+    };
+    wk.onerror = err => { wk.terminate(); reject(new Error(err.message || 'worker')); };
+    const copy = px.slice(); // 작업 화면을 유지하려고 복사본을 넘김
+    wk.postMessage({ data: copy.buffer, width: w, height: h, quality: q }, [copy.buffer]);
+  });
+}
+function jpegWorker() {
+  self.onmessage = ev => {
+    const { data, width, height, quality } = ev.data;
+    try { const out = encode(new Uint8Array(data), width, height, quality); self.postMessage({ ok: true, buf: out.buffer }, [out.buffer]); }
+    catch (err) { self.postMessage({ ok: false, error: String(err) }); }
+  };
+  function encode(px, W, H, quality) {
+    const ZZ = [0,1,5,6,14,15,27,28,2,4,7,13,16,26,29,42,3,8,12,17,25,30,41,43,9,11,18,24,31,40,44,53,10,19,23,32,39,45,52,54,20,22,33,38,46,51,55,60,21,34,37,47,50,56,59,61,35,36,48,49,57,58,62,63];
+    const YQT = [16,11,10,16,24,40,51,61,12,12,14,19,26,58,60,55,14,13,16,24,40,57,69,56,14,17,22,29,51,87,80,62,18,22,37,56,68,109,103,77,24,35,55,64,81,104,113,92,49,64,78,87,103,121,120,101,72,92,95,98,112,100,103,99];
+    const UVQT = [17,18,24,47,99,99,99,99,18,21,26,66,99,99,99,99,24,26,56,99,99,99,99,99,47,66,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99];
+    const DC_L_NR = [0,0,1,5,1,1,1,1,1,1,0,0,0,0,0,0,0], DC_L_V = [0,1,2,3,4,5,6,7,8,9,10,11];
+    const AC_L_NR = [0,0,2,1,3,3,2,4,3,5,5,4,4,0,0,1,0x7d];
+    const AC_L_V = [0x01,0x02,0x03,0x00,0x04,0x11,0x05,0x12,0x21,0x31,0x41,0x06,0x13,0x51,0x61,0x07,0x22,0x71,0x14,0x32,0x81,0x91,0xa1,0x08,0x23,0x42,0xb1,0xc1,0x15,0x52,0xd1,0xf0,0x24,0x33,0x62,0x72,0x82,0x09,0x0a,0x16,0x17,0x18,0x19,0x1a,0x25,0x26,0x27,0x28,0x29,0x2a,0x34,0x35,0x36,0x37,0x38,0x39,0x3a,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4a,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5a,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6a,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7a,0x83,0x84,0x85,0x86,0x87,0x88,0x89,0x8a,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9a,0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,0xa8,0xa9,0xaa,0xb2,0xb3,0xb4,0xb5,0xb6,0xb7,0xb8,0xb9,0xba,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,0xc8,0xc9,0xca,0xd2,0xd3,0xd4,0xd5,0xd6,0xd7,0xd8,0xd9,0xda,0xe1,0xe2,0xe3,0xe4,0xe5,0xe6,0xe7,0xe8,0xe9,0xea,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9,0xfa];
+    const DC_C_NR = [0,0,3,1,1,1,1,1,1,1,1,1,0,0,0,0,0], DC_C_V = [0,1,2,3,4,5,6,7,8,9,10,11];
+    const AC_C_NR = [0,0,2,1,2,4,4,3,4,7,5,4,4,0,1,2,0x77];
+    const AC_C_V = [0x00,0x01,0x02,0x03,0x11,0x04,0x05,0x21,0x31,0x06,0x12,0x41,0x51,0x07,0x61,0x71,0x13,0x22,0x32,0x81,0x08,0x14,0x42,0x91,0xa1,0xb1,0xc1,0x09,0x23,0x33,0x52,0xf0,0x15,0x62,0x72,0xd1,0x0a,0x16,0x24,0x34,0xe1,0x25,0xf1,0x17,0x18,0x19,0x1a,0x26,0x27,0x28,0x29,0x2a,0x35,0x36,0x37,0x38,0x39,0x3a,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4a,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5a,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6a,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7a,0x82,0x83,0x84,0x85,0x86,0x87,0x88,0x89,0x8a,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9a,0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,0xa8,0xa9,0xaa,0xb2,0xb3,0xb4,0xb5,0xb6,0xb7,0xb8,0xb9,0xba,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,0xc8,0xc9,0xca,0xd2,0xd3,0xd4,0xd5,0xd6,0xd7,0xd8,0xd9,0xda,0xe2,0xe3,0xe4,0xe5,0xe6,0xe7,0xe8,0xe9,0xea,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9,0xfa];
+    const huff = (nr, vals) => {
+      const code = new Int32Array(256), len = new Int32Array(256);
+      let cv = 0, p = 0;
+      for (let k = 1; k <= 16; k++) { for (let j = 0; j < nr[k]; j++) { code[vals[p]] = cv; len[vals[p]] = k; p++; cv++; } cv <<= 1; }
+      if (p !== vals.length) throw new Error('huffman table');
+      return { code, len };
+    };
+    const HYDC = huff(DC_L_NR, DC_L_V), HYAC = huff(AC_L_NR, AC_L_V), HCDC = huff(DC_C_NR, DC_C_V), HCAC = huff(AC_C_NR, AC_C_V);
+    const sf = quality < 50 ? Math.floor(5000 / quality) : Math.floor(200 - quality * 2);
+    const YT = new Uint8Array(64), UVT = new Uint8Array(64);
+    for (let i = 0; i < 64; i++) {
+      YT[ZZ[i]] = Math.min(255, Math.max(1, Math.floor((YQT[i] * sf + 50) / 100)));
+      UVT[ZZ[i]] = Math.min(255, Math.max(1, Math.floor((UVQT[i] * sf + 50) / 100)));
+    }
+    const aasf = [1.0, 1.387039845, 1.306562965, 1.175875602, 1.0, 0.785694958, 0.541196100, 0.275899379];
+    const fY = new Float64Array(64), fC = new Float64Array(64);
+    for (let r = 0, k = 0; r < 8; r++) for (let c = 0; c < 8; c++, k++) {
+      fY[k] = 1 / (YT[ZZ[k]] * aasf[r] * aasf[c] * 8);
+      fC[k] = 1 / (UVT[ZZ[k]] * aasf[r] * aasf[c] * 8);
+    }
+    let out = new Uint8Array(Math.max(1 << 20, (W * H) >> 1)), op = 0;
+    const wb = b => { if (op >= out.length) { const n = new Uint8Array(out.length * 2); n.set(out); out = n; } out[op++] = b; };
+    const ww = v => { wb((v >> 8) & 255); wb(v & 255); };
+    let bytenew = 0, bytepos = 7;
+    const bits = (val, ln) => {
+      for (let pv = ln - 1; pv >= 0; pv--) {
+        if (val & (1 << pv)) bytenew |= 1 << bytepos;
+        bytepos--;
+        if (bytepos < 0) { if (bytenew === 0xFF) { wb(0xFF); wb(0); } else wb(bytenew); bytepos = 7; bytenew = 0; }
+      }
+    };
+    const cat = v => { let a = v < 0 ? -v : v, n = 0; while (a) { n++; a >>= 1; } return n; };
+    const DU = new Int32Array(64), Q = new Int32Array(64);
+    function fdct(d, ft) {
+      for (let o = 0; o < 64; o += 8) {
+        const t0 = d[o] + d[o+7], t7 = d[o] - d[o+7], t1 = d[o+1] + d[o+6], t6 = d[o+1] - d[o+6];
+        const t2 = d[o+2] + d[o+5], t5 = d[o+2] - d[o+5], t3 = d[o+3] + d[o+4], t4 = d[o+3] - d[o+4];
+        let t10 = t0 + t3; const t13 = t0 - t3; let t11 = t1 + t2; let t12 = t1 - t2;
+        d[o] = t10 + t11; d[o+4] = t10 - t11;
+        const z1 = (t12 + t13) * 0.707106781; d[o+2] = t13 + z1; d[o+6] = t13 - z1;
+        t10 = t4 + t5; t11 = t5 + t6; t12 = t6 + t7;
+        const z5 = (t10 - t12) * 0.382683433, z2 = 0.541196100 * t10 + z5, z4 = 1.306562965 * t12 + z5, z3 = t11 * 0.707106781;
+        const z11 = t7 + z3, z13 = t7 - z3;
+        d[o+5] = z13 + z2; d[o+3] = z13 - z2; d[o+1] = z11 + z4; d[o+7] = z11 - z4;
+      }
+      for (let o = 0; o < 8; o++) {
+        const t0 = d[o] + d[o+56], t7 = d[o] - d[o+56], t1 = d[o+8] + d[o+48], t6 = d[o+8] - d[o+48];
+        const t2 = d[o+16] + d[o+40], t5 = d[o+16] - d[o+40], t3 = d[o+24] + d[o+32], t4 = d[o+24] - d[o+32];
+        let t10 = t0 + t3; const t13 = t0 - t3; let t11 = t1 + t2; let t12 = t1 - t2;
+        d[o] = t10 + t11; d[o+32] = t10 - t11;
+        const z1 = (t12 + t13) * 0.707106781; d[o+16] = t13 + z1; d[o+48] = t13 - z1;
+        t10 = t4 + t5; t11 = t5 + t6; t12 = t6 + t7;
+        const z5 = (t10 - t12) * 0.382683433, z2 = 0.541196100 * t10 + z5, z4 = 1.306562965 * t12 + z5, z3 = t11 * 0.707106781;
+        const z11 = t7 + z3, z13 = t7 - z3;
+        d[o+40] = z13 + z2; d[o+24] = z13 - z2; d[o+8] = z11 + z4; d[o+56] = z11 - z4;
+      }
+      for (let i = 0; i < 64; i++) { const f = d[i] * ft[i]; Q[i] = f > 0 ? (f + 0.5) | 0 : (f - 0.5) | 0; }
+    }
+    function block(d, ft, DC, HDC, HAC) {
+      fdct(d, ft);
+      for (let j = 0; j < 64; j++) DU[ZZ[j]] = Q[j];
+      const diff = DU[0] - DC; DC = DU[0];
+      if (diff === 0) bits(HDC.code[0], HDC.len[0]);
+      else { const n = cat(diff); bits(HDC.code[n], HDC.len[n]); bits(diff < 0 ? diff + (1 << n) - 1 : diff, n); }
+      let end = 63; while (end > 0 && DU[end] === 0) end--;
+      if (end === 0) { bits(HAC.code[0], HAC.len[0]); return DC; }
+      let i = 1;
+      while (i <= end) {
+        const start = i; while (DU[i] === 0 && i <= end) i++;
+        let nz = i - start;
+        if (nz >= 16) { for (let m = 0; m < (nz >> 4); m++) bits(HAC.code[0xF0], HAC.len[0xF0]); nz &= 15; }
+        const v = DU[i], n = cat(v), sym = (nz << 4) + n;
+        bits(HAC.code[sym], HAC.len[sym]); bits(v < 0 ? v + (1 << n) - 1 : v, n);
+        i++;
+      }
+      if (end !== 63) bits(HAC.code[0], HAC.len[0]);
+      return DC;
+    }
+    // 헤더
+    ww(0xFFD8);
+    ww(0xFFE0); ww(16); [0x4A,0x46,0x49,0x46,0,1,1,0].forEach(wb); ww(1); ww(1); wb(0); wb(0);
+    ww(0xFFDB); ww(132); wb(0); for (let i = 0; i < 64; i++) wb(YT[i]); wb(1); for (let i = 0; i < 64; i++) wb(UVT[i]);
+    ww(0xFFC0); ww(17); wb(8); ww(H); ww(W); wb(3); wb(1); wb(0x11); wb(0); wb(2); wb(0x11); wb(1); wb(3); wb(0x11); wb(1);
+    ww(0xFFC4); ww(0x01A2);
+    const dht = (cls, nr, vals) => { wb(cls); for (let k = 1; k <= 16; k++) wb(nr[k]); vals.forEach(wb); };
+    dht(0x00, DC_L_NR, DC_L_V); dht(0x10, AC_L_NR, AC_L_V); dht(0x01, DC_C_NR, DC_C_V); dht(0x11, AC_C_NR, AC_C_V);
+    ww(0xFFDA); ww(12); wb(3); wb(1); wb(0); wb(2); wb(0x11); wb(3); wb(0x11); wb(0); wb(0x3f); wb(0);
+    const Yb = new Float64Array(64), Ub = new Float64Array(64), Vb = new Float64Array(64);
+    let dcY = 0, dcU = 0, dcV = 0;
+    for (let y = 0; y < H; y += 8) {
+      for (let x = 0; x < W; x += 8) {
+        for (let p = 0; p < 64; p++) {
+          let yy = y + (p >> 3), xx = x + (p & 7);
+          if (yy >= H) yy = H - 1; if (xx >= W) xx = W - 1;
+          const i = (yy * W + xx) * 4, R = px[i], G = px[i + 1], B = px[i + 2];
+          Yb[p] = 0.299 * R + 0.587 * G + 0.114 * B - 128;
+          Ub[p] = -0.16874 * R - 0.33126 * G + 0.5 * B;
+          Vb[p] = 0.5 * R - 0.41869 * G - 0.08131 * B;
+        }
+        dcY = block(Yb, fY, dcY, HYDC, HYAC);
+        dcU = block(Ub, fC, dcU, HCDC, HCAC);
+        dcV = block(Vb, fC, dcV, HCDC, HCAC);
+      }
+      if ((y & 255) === 0) self.postMessage({ progress: y / H });
+    }
+    if (bytepos >= 0) bits((1 << (bytepos + 1)) - 1, bytepos + 1);
+    ww(0xFFD9);
+    return out.slice(0, op);
+  }
+}
+window.__lp = { encodeJPEGInWorker, encodePNG, get doc() { return doc; }, view, S, warpDab, render };
+
+/* ---------- 시작 ---------- */
+gl.canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); fatal('그래픽 메모리가 부족해서 작업 화면이 초기화됐어요. 페이지를 새로 고친 뒤 다시 열어 주세요.'); });
+new ResizeObserver(resize).observe(stage);
+resize();
+syncControls(); setTool(S.tool); updateHistoryUI();
+makeSample();
+requestAnimationFrame(frame);
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+})();
+</script>
+</body>
+</html>
