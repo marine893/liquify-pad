@@ -138,7 +138,7 @@ details>.group{margin-top:10px}
 <body>
 <div id="app">
   <header id="top">
-    <div class="brand">Liquify Pad<small>v2</small></div>
+    <div class="brand">Liquify Pad<small>v2.1</small></div>
     <button class="btn" id="btnOpen" title="사진 열기 (⌘O)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h6l2 2h10v10H3z"/></svg>열기</button>
     <span id="fileName"></span>
@@ -316,6 +316,10 @@ details>.group{margin-top:10px}
       <tr><td>한 손가락 · 두 손가락</td><td>화면 이동 · 확대/축소</td></tr>
       <tr><td>두 손가락 탭 · 세 손가락 탭</td><td>실행 취소 · 다시 실행</td></tr>
     </table>
+    <details id="diagBox"><summary>진단 정보 (문제가 생기면 이 내용을 알려 주세요)</summary>
+      <pre id="diagText" style="white-space:pre-wrap;font:12px var(--mono);color:var(--muted);margin:10px 0 0;-webkit-user-select:text;user-select:text"></pre>
+      <div class="btnrow"><button class="btn sm" id="btnSelfTest">유동화 자체 점검</button></div>
+    </details>
     <div class="btnrow"><button class="btn primary" data-close>닫기</button></div>
   </div>
 </div>
@@ -451,10 +455,10 @@ function fatal(msg) { const d = document.createElement('div'); d.id = 'fatal'; d
 /* ================= WebGL ================= */
 const gl = glc.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' });
 if (!gl) { fatal('이 브라우저는 WebGL2를 지원하지 않아요. 최신 iPadOS의 Safari에서 열어 주세요.'); return; }
-let FIELD = null;
-if (gl.getExtension('EXT_color_buffer_float')) FIELD = { internal: gl.RG32F };
-else if (gl.getExtension('EXT_color_buffer_half_float')) FIELD = { internal: gl.RG16F };
-if (!FIELD) { fatal('이 기기의 그래픽 기능으로는 유동화를 계산할 수 없어요.'); return; }
+const hasF32 = !!gl.getExtension('EXT_color_buffer_float');
+const hasF16 = !!gl.getExtension('EXT_color_buffer_half_float');
+let FIELD = null; // 아래 probeField()에서 실제로 그려지고 읽히는 형식을 골라 정함
+const diag = { field: '-', probe: [], pen: 0, touch: 0, mouse: 0, strokes: 0, dabs: 0, lastErr: '' };
 
 const VS = `#version 300 es
 in vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }`;
@@ -668,6 +672,32 @@ function copyLayerToTex(layer) {
   return t;
 }
 
+/* 변위 필드 형식 점검: 확장 기능이 있다고 해도 기기마다 실제로 안 그려지는 형식이 있어서 직접 그려 보고 고른다 */
+function probeField() {
+  const prog = makeProgram(HEAD + 'out vec4 o; void main(){ o = vec4(1.5, -2.5, 0.0, 1.0); }');
+  const cands = [];
+  if (hasF32) cands.push(['RG32F', gl.RG32F], ['RGBA32F', gl.RGBA32F]);
+  if (hasF32 || hasF16) cands.push(['RG16F', gl.RG16F], ['RGBA16F', gl.RGBA16F]);
+  for (const [name, internal] of cands) {
+    let ok = false;
+    try {
+      while (gl.getError()) {}
+      const t = makeTex(4, 4, internal, false);
+      target(t, 4, 4);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+        gl.useProgram(prog.p); draw();
+        const buf = new Float32Array(16); gl.readPixels(0, 0, 2, 2, gl.RGBA, gl.FLOAT, buf);
+        ok = Math.abs(buf[0] - 1.5) < 0.01 && Math.abs(buf[1] + 2.5) < 0.01 && !gl.getError();
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteTexture(t);
+    } catch (e) { ok = false; }
+    diag.probe.push(name + (ok ? ' ✓' : ' ✗'));
+    if (ok) { FIELD = { internal }; diag.field = name; return true; }
+  }
+  return false;
+}
+if (!probeField()) { fatal('이 기기의 그래픽 기능으로는 유동화를 계산할 수 없어요. (' + diag.probe.join(', ') + ')'); return; }
+
 /* 커브 LUT */
 const lutTex = makeTex(256, 1, gl.RGBA8, true);
 let curvesActive = false;
@@ -866,6 +896,7 @@ function scissorFor(cx, cy, r) {
 }
 function warpDab(mode, cx, cy, r, str, o) {
   const d = doc;
+  diag.dabs++;
   if (!scissorFor(cx, cy, r)) return;
   unbindAll();
   target(d.scratch, d.fw, d.fh);
@@ -1171,6 +1202,7 @@ let stroke = null, drag = null, spaceHeld = false;
 function pressureOf(e) { return (S.usePressure && e.pointerType === 'pen' && e.pressure > 0) ? Math.min(1, Math.max(0.05, e.pressure)) : 1; }
 function beginStroke(sp, e) {
   const tool = S.liqTool;
+  diag.strokes++;
   pushTex();
   const ip = toImg(sp);
   stroke = { id: e.pointerId, tool, last: ip, cur: ip, applied: ip, alt: e.altKey, pf: pressureOf(e) };
@@ -1364,6 +1396,7 @@ function cropChange(fn) {
 
 /* ================= 포인터 · 제스처 ================= */
 const touches = new Map();
+let fingerHintShown = false;
 let gesture = null, tapInfo = null;
 function capture(e) { try { stage.setPointerCapture(e.pointerId); } catch (err) {} }
 function touchCentroid() { let x = 0, y = 0; for (const t of touches.values()) { x += t.x; y += t.y; } return { x: x / touches.size, y: y / touches.size }; }
@@ -1396,6 +1429,7 @@ function primaryDown(sp, e) {
 }
 stage.addEventListener('pointerdown', e => {
   if (!doc || e.target !== glc) return; // 화면 위 버튼(복원 막대 등)은 그대로 눌리게
+  diag[e.pointerType] = (diag[e.pointerType] || 0) + 1;
   const sp = stagePt(e);
   if (e.pointerType === 'touch') {
     if ((stroke && !stroke.finger) || (drag && !drag.finger)) return; // 펜슬 사용 중엔 손바닥 무시
@@ -1411,7 +1445,13 @@ stage.addEventListener('pointerdown', e => {
       moveCursor(sp, false); gesture = null;
       if (activeAction() === 'liquify') { beginStroke(sp, e); stroke.finger = true; }
       else { const d = primaryDown(sp, e); if (d) { drag = d; drag.id = e.pointerId; drag.finger = true; } }
-    } else startGesture();
+    } else {
+      startGesture();
+      if (touches.size === 1 && !fingerHintShown && (activeAction() === 'liquify' || activeAction() === 'mask')) {
+        fingerHintShown = true;
+        toast('손가락은 화면 이동·확대용이에요. 펜슬로 칠하거나, 설정의 「손가락으로도 칠하기」를 켜세요.', 4000);
+      }
+    }
     return;
   }
   if (e.button !== 0) return;
@@ -1719,7 +1759,41 @@ $('#btnUndo').addEventListener('click', undo);
 $('#btnRedo').addEventListener('click', redo);
 $('#btnFit').addEventListener('click', fit);
 $('#btnPanel').addEventListener('click', togglePanel);
-$('#btnHelp').addEventListener('click', () => openModal('helpModal'));
+$('#btnHelp').addEventListener('click', () => { updateDiag(); openModal('helpModal'); });
+function updateDiag(extra) {
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  $('#diagText').textContent = [
+    `버전 v2.1 · ${navigator.userAgent.match(/(iPad|iPhone|Macintosh|Windows|Android)[^;)]*/)?.[0] || ''}`,
+    `GPU ${gpu} · 최대 텍스처 ${gl.getParameter(gl.MAX_TEXTURE_SIZE)}`,
+    `변위 필드 ${diag.field} (${diag.probe.join(', ')})`,
+    doc ? `사진 ${doc.w}×${doc.h} · 필드 ${doc.fw}×${doc.fh}` : '사진 없음',
+    `입력 펜 ${diag.pen} · 터치 ${diag.touch} · 마우스 ${diag.mouse} · 유동화 획 ${diag.strokes} · 계산 ${diag.dabs}`,
+    `모드 ${S.mode} · 도구 ${S.liqTool} · 브러시 ${S.diameter}px · 압력 ${S.strength}`,
+    extra || ''
+  ].join('\n');
+}
+function readFieldMax() {
+  unbindAll(); target(doc.field, doc.fw, doc.fh);
+  const b = new Float32Array(doc.fw * doc.fh * 4); gl.readPixels(0, 0, doc.fw, doc.fh, gl.RGBA, gl.FLOAT, b);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  let mx = 0; for (let i = 0; i < b.length; i += 4) mx = Math.max(mx, Math.hypot(b[i], b[i + 1]));
+  return mx;
+}
+$('#btnSelfTest').addEventListener('click', () => {
+  if (!doc) return;
+  let msg;
+  try {
+    const before = readFieldMax();
+    pushTex();
+    const cx = doc.w / 2, cy = doc.h / 2, r = Math.max(doc.w, doc.h) / 10;
+    for (let i = 0; i < 10; i++) warpDab(0, cx + i * r * 0.05, cy, r, 1, { dx: r * 0.05, dy: 0 });
+    const after = readFieldMax();
+    dropLastEntry();
+    msg = `자체 점검: 변형 ${before.toFixed(1)} → ${after.toFixed(1)}px · GL 오류 ${gl.getError()} → ${after > before + 1 ? '정상 ✓' : '계산이 안 됨 ✗'}`;
+  } catch (err) { msg = '자체 점검 실패: ' + err.message; }
+  updateDiag(msg);
+});
 $('#btnExport').addEventListener('click', openExport);
 $('#btnCompare').addEventListener('click', () => setCompare(!compare));
 function openModal(id) { $('#' + id).hidden = false; }
@@ -1872,7 +1946,9 @@ $('#btnRestoreSession').addEventListener('click', async () => {
     if (doc.fw === s.fw && doc.fh === s.fh) {
       unbindAll();
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.bindTexture(gl.TEXTURE_2D, doc.field); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, doc.fw, doc.fh, gl.RG, gl.FLOAT, s.field);
+      gl.bindTexture(gl.TEXTURE_2D, doc.field);
+      if (FIELD.internal === gl.RG32F || FIELD.internal === gl.RG16F) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, doc.fw, doc.fh, gl.RG, gl.FLOAT, s.field);
+      else { const f4 = new Float32Array(doc.fw * doc.fh * 4); for (let i = 0, n = doc.fw * doc.fh; i < n; i++) { f4[i * 4] = s.field[i * 2]; f4[i * 4 + 1] = s.field[i * 2 + 1]; } gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, doc.fw, doc.fh, gl.RGBA, gl.FLOAT, f4); }
       gl.bindTexture(gl.TEXTURE_2D, doc.mask); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, doc.fw, doc.fh, gl.RED, gl.UNSIGNED_BYTE, s.freeze);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, doc.brush);
       for (const [layer, data] of Object.entries(s.brush || {})) gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, +layer, doc.fw, doc.fh, 1, gl.RED, gl.UNSIGNED_BYTE, data);
